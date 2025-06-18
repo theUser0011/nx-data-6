@@ -230,7 +230,10 @@ def start():
                 )
 
                 processed_count += 1
+                print(f"processed_count : {processed_count}")
                 if processed_count % 10 == 0:
+                    print(f"calling Function : {processed_count}")
+                    
                     zip_json_folder(start_id - 9, start_id)
 
                 start_id += 1
