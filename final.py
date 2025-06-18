@@ -158,7 +158,6 @@ def zip_json_folder(start_id, index):
         os.remove(zip_filename)
     
 
-
 def start():
     json_folder = "json_files"
     if not os.path.exists(json_folder):
@@ -166,60 +165,54 @@ def start():
 
     client = None
     try:
-        # Connect to MongoDB
         mongo_url = os.getenv("MONGO_URL")
         client = MongoClient(mongo_url)
         db = client['miruai_tv_1']
         collection = db['coll_1']
 
-        # Look for tracking document by ID
+        # Fetch or initialize tracking doc
         tracking_doc = collection.find_one({"id": "action_1"})
-
-        # If not found, initialize the document
         if tracking_doc is None:
             print("No tracking document found. Initializing with default values.")
             tracking_doc = {
                 "id": "action_1",
                 "start_id": 1,
-                "end_id": 1,
                 "last_saved_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             }
             collection.insert_one(tracking_doc)
 
         start_id = tracking_doc["start_id"]
-        end_id = tracking_doc["end_id"]
+        processed_count = 0
 
-        for index in range(start_id, end_id):
+        while True:
             try:
-                print(f"{index + 1}/{end_id}")
-                fetch_all_episode_urls(index, index)
+                print(f"🔄 Processing anime_id: {start_id}")
+                fetch_all_episode_urls(start_id, start_id)
 
-                # Optional live update after each iteration
+                # Update progress in DB immediately
                 collection.update_one(
                     {"id": "action_1"},
-                    {"$set": {"start_id": index + 1}}
+                    {
+                        "$set": {
+                            "start_id": start_id + 1,
+                            "last_saved_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                        }
+                    }
                 )
 
-                if index % 10 == 0:
-                    zip_json_folder(start_id,index)
-            except Exception as loop_err:
-                print(f"Error during processing of anime_id {index}: {loop_err}")
+                processed_count += 1
+                if processed_count % 10 == 0:
+                    zip_json_folder(start_id - 9, start_id)
 
-        # Final update: move to next ID and timestamp
-        collection.update_one(
-            {"id": "action_1"},
-            {
-                "$set": {
-                    "start_id": end_id,
-                    "end_id": end_id + 1,
-                    "last_saved_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                }
-            }
-        )
+                start_id += 1
+
+            except Exception as loop_err:
+                print(f"❌ Error during processing of anime_id {start_id}: {loop_err}")
+                # Optional: wait before retrying next
+                time.sleep(2)
+                start_id += 1  # Skip problematic ID
 
     finally:
         if client:
             client.close()
-
-
 start()
