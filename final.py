@@ -130,7 +130,7 @@ def fetch_all_episode_urls(anime_id, index):
 
 def zip_json_folder(start_id, index):
     folder_name = 'json_files'
-    zip_filename = f"{start_id}_{index}_json_files"
+    zip_filename = f"{start_id}_{index}_json_files.zip"
 
     if not os.path.exists(folder_name):
         print(f"Folder '{folder_name}' does not exist. Skipping zipping.")
@@ -143,19 +143,48 @@ def zip_json_folder(start_id, index):
                 arcname = os.path.relpath(file_path, start=folder_name)
                 zipf.write(file_path, arcname)
 
-    print(f"Folder '{folder_name}' zipped successfully into '{zip_filename}'")
+    print(f"✅ Zipped '{folder_name}' into '{zip_filename}'")
+
     keys = os.getenv("M_TOKEN")
     keys = keys.split("_")
     mega = Mega()
-    m = mega.login(keys[0],keys[1])
-    
+    m = mega.login(keys[0], keys[1])
+
     try:
         m.upload(zip_filename)
+        print(f"✅ Uploaded '{zip_filename}' to Mega")
+
+        # Save record in DB after successful upload
+        mongo_url = os.getenv("MONGO_URL")
+        client = MongoClient(mongo_url)
+        db = client['miruai_tv_1']
+        cloud_coll = db['cloud_files']
+
+        cloud_coll.insert_one({
+            "filename": zip_filename,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "message":"File sucessfully Uplaoded"
+            
+            
+        })
+
     except Exception as e:
-        print("Error : ",e)
+        print(f"❌ Upload failed or DB insert error: {e}")
+        
+        cloud_coll.insert_one({
+            "filename": zip_filename,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+             "message":"File Uplaoding Failed"
+
+        })
+
     finally:
         shutil.rmtree(folder_name)
         os.remove(zip_filename)
+        print(f"🧹 Cleaned up: removed '{folder_name}' and '{zip_filename}'")
+
+
+
     
 
 def start():
