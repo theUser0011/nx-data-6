@@ -1,14 +1,12 @@
-
-import json,os
-import requests,time
+import json, os, time, zipfile, shutil, requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from pymongo import MongoClient
 from mega import Mega
-import zipfile,shutil
 
+
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 CHROMEDRIVER_PATH = r"chromedriver"
 
@@ -33,13 +31,13 @@ def get_total_episodes(anime_id):
 
         if response.status_code == 200:
             data = response.json()
-            print("Fetched total episodes successfully")
+            print("✅ Fetched total episodes")
             return data['data']['Media']['episodes']
         else:
-            print(f"Error fetching episodes: Status code {response.status_code}")
+            print(f"❌ Error fetching episodes: {response.status_code}")
             return None
     except Exception as e:
-        print(f"Exception in get_total_episodes: {e}")
+        print(f"❌ Exception in get_total_episodes: {e}")
         return None
 
 
@@ -52,27 +50,23 @@ class WebDriverManager:
         self.driver = webdriver.Chrome(options=options)
 
     def get_video_url(self, url):
-        # print(f"Fetching video URL for: {url}")
         self.driver.get(url)
 
         for attempt in range(3):
             try:
-                time.sleep(5)  # Give time for page to load JS
+                time.sleep(5)
                 video_element = self.driver.find_element(By.TAG_NAME, 'source')
                 video_url = video_element.get_attribute("src")
 
                 if video_url and '[object' not in video_url:
-                    # print(f"✅ Valid video URL found on attempt {attempt + 1}")
                     return video_url
                 else:
-                    print(f"⚠️ Invalid video URL on attempt {attempt + 1}: {video_url}")
+                    print(f"⚠️ Invalid video URL on attempt {attempt + 1}")
             except Exception as e:
                 print(f"❌ Exception on attempt {attempt + 1}: {e}")
 
         print("🚫 Failed to fetch valid video URL after 3 attempts.")
         return None
-
-
 
     def close(self):
         self.driver.quit()
@@ -83,109 +77,81 @@ def fetch_all_episode_urls(anime_id, index):
         print("Fetching total episodes...")
         total_episodes = get_total_episodes(anime_id)
         if total_episodes is None:
-            print("Episodes count not found ... skipping")
+            print("⚠️ Episodes not found, skipping ID")
             return
 
-        print(f"Total episodes: {total_episodes}")
+        print(f"📺 Total episodes: {total_episodes}")
 
         driver_manager = WebDriverManager()
         video_urls = []
-        total_episodes = total_episodes if total_episodes >0 else None
-        
-        
-        for episode_num in range(1, total_episodes + 1):
-            # print("\033[F\033[K" * 2, end='')
-            # print(f"Processing episode {episode_num}/{total_episodes}...")
 
+        for episode_num in range(1, total_episodes + 1):
             try:
                 episode_url = f"https://www.miruro.tv/watch?id={anime_id}&ep={episode_num}"
                 video_src = driver_manager.get_video_url(episode_url)
 
                 if video_src:
-                    # print(f"Video URL for episode {episode_num}")
                     video_urls.append({"episode": episode_num, "video_url": video_src})
                 else:
-                    print(f"No video URL found for episode {episode_num}")
+                    print(f"⚠️ No video URL for episode {episode_num}")
             except Exception as ep_err:
-                print(f"Error processing episode {episode_num}: {ep_err}")
+                print(f"❌ Error processing episode {episode_num}: {ep_err}")
 
-        if (index + 1) % 10 == 0:
-            print("10 ids limit reached, restarting driver")
-            driver_manager.close()
-            time.sleep(3)
-            # os.system("cls")
+        driver_manager.close()
 
         # Save data to JSON
+        json_folder = "json_files"
+        os.makedirs(json_folder, exist_ok=True)
+        json_path = os.path.join(json_folder, f"{anime_id}_data.json")
+
         try:
-            with open(f"./json_files/{anime_id}_data.json", "w", encoding="utf-8") as file:
+            with open(json_path, "w", encoding="utf-8") as file:
                 json.dump(video_urls, file, indent=4)
-            # print("All episode URLs saved to data.json")
+            print(f"✅ Saved: {json_path}")
         except Exception as write_err:
-            print(f"Error writing JSON: {write_err}")
-        
+            print(f"❌ Error writing JSON: {write_err}")
+            return
+
+        # Upload to Mega
+        try:
+            keys = os.getenv("M_TOKEN").split("_")
+            mega = Mega()
+            m = mega.login(keys[0], keys[1])
+            m.upload(json_path)
+            print(f"✅ Uploaded {json_path} to Mega")
+
+            # Log success to Mongo
+            mongo_url = os.getenv("MONGO_URL")
+            client = MongoClient(mongo_url)
+            db = client['miruai_tv_1']
+            cloud_coll = db['cloud_files']
+
+            cloud_coll.insert_one({
+                "filename": f"{anime_id}_data.json",
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "message": "File successfully uploaded"
+            })
+        except Exception as e:
+            print(f"❌ Upload or DB insert error: {e}")
+            try:
+                cloud_coll.insert_one({
+                    "filename": f"{anime_id}_data.json",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "message": "File upload failed"
+                })
+            except:
+                pass
+
+        # Delete local file
+        try:
+            os.remove(json_path)
+            print(f"🧹 Removed local file: {json_path}")
+        except:
+            print(f"⚠️ Could not delete local file: {json_path}")
 
     except Exception as e:
-        print(f"Unexpected error in fetch_all_episode_urls for anime_id {anime_id}: {e}")
+        print(f"❌ Unexpected error for anime_id {anime_id}: {e}")
 
-
-def zip_json_folder(start_id, index):
-    folder_name = 'json_files'
-    zip_filename = f"{start_id}_{index}_json_files.zip"
-
-    if not os.path.exists(folder_name):
-        print(f"Folder '{folder_name}' does not exist. Skipping zipping.")
-        return
-
-    with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(folder_name):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, start=folder_name)
-                zipf.write(file_path, arcname)
-
-    print(f"✅ Zipped '{folder_name}' into '{zip_filename}'")
-
-    keys = os.getenv("M_TOKEN")
-    keys = keys.split("_")
-    mega = Mega()
-    m = mega.login(keys[0], keys[1])
-
-    try:
-        m.upload(zip_filename)
-        print(f"✅ Uploaded '{zip_filename}' to Mega")
-
-        # Save record in DB after successful upload
-        mongo_url = os.getenv("MONGO_URL")
-        client = MongoClient(mongo_url)
-        db = client['miruai_tv_1']
-        cloud_coll = db['cloud_files']
-
-        cloud_coll.insert_one({
-            "filename": zip_filename,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "message":"File sucessfully Uplaoded"
-            
-            
-        })
-
-    except Exception as e:
-        print(f"❌ Upload failed or DB insert error: {e}")
-        
-        cloud_coll.insert_one({
-            "filename": zip_filename,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-             "message":"File Uplaoding Failed"
-
-        })
-
-    finally:
-        shutil.rmtree(folder_name)
-        os.remove(zip_filename)
-        print(f"🧹 Cleaned up: removed '{folder_name}' and '{zip_filename}'")
-
-
-
-    
 
 def start():
     json_folder = "json_files"
@@ -199,10 +165,9 @@ def start():
         db = client['miruai_tv_1']
         collection = db['coll_1']
 
-        # Fetch or initialize tracking doc
         tracking_doc = collection.find_one({"id": "action_1"})
         if tracking_doc is None:
-            print("No tracking document found. Initializing with default values.")
+            print("Initializing tracking document...")
             tracking_doc = {
                 "id": "action_1",
                 "start_id": 1,
@@ -215,10 +180,9 @@ def start():
 
         while True:
             try:
-                print(f"🔄 Processing anime_id: {start_id}")
+                print(f"\n🔄 Processing anime_id: {start_id}")
                 fetch_all_episode_urls(start_id, start_id)
 
-                # Update progress in DB immediately
                 collection.update_one(
                     {"id": "action_1"},
                     {
@@ -230,21 +194,17 @@ def start():
                 )
 
                 processed_count += 1
-                print(f"processed_count : {processed_count}")
-                if processed_count % 10 == 0:
-                    print(f"calling Function : {processed_count}")
-                    
-                    zip_json_folder(start_id - 9, start_id)
-
                 start_id += 1
 
             except Exception as loop_err:
-                print(f"❌ Error during processing of anime_id {start_id}: {loop_err}")
-                # Optional: wait before retrying next
+                print(f"❌ Error during anime_id {start_id}: {loop_err}")
                 time.sleep(2)
-                start_id += 1  # Skip problematic ID
+                start_id += 1
 
     finally:
         if client:
             client.close()
+
+
+# Run the script
 start()
