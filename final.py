@@ -1,12 +1,9 @@
-import json, os, time, zipfile, shutil, requests
+import json, os, time, requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from pymongo import MongoClient
 from mega import Mega
 
-
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 CHROMEDRIVER_PATH = r"chromedriver"
 
@@ -112,15 +109,15 @@ def fetch_all_episode_urls(anime_id, index):
             print(f"❌ Error writing JSON: {write_err}")
             return
 
-        # Upload to Mega
+        # Upload to Mega and save public link to DB
         try:
             keys = os.getenv("M_TOKEN").split("_")
             mega = Mega()
             m = mega.login(keys[0], keys[1])
-            m.upload(json_path)
-            print(f"✅ Uploaded {json_path} to Mega")
+            file = m.upload(json_path)
+            public_link = m.get_upload_link(file)
+            print(f"✅ Uploaded to Mega: {public_link}")
 
-            # Log success to Mongo
             mongo_url = os.getenv("MONGO_URL")
             client = MongoClient(mongo_url)
             db = client['miruai_tv_1']
@@ -129,8 +126,10 @@ def fetch_all_episode_urls(anime_id, index):
             cloud_coll.insert_one({
                 "filename": f"{anime_id}_data.json",
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "public_link": public_link,
                 "message": "File successfully uploaded"
             })
+
         except Exception as e:
             print(f"❌ Upload or DB insert error: {e}")
             try:
