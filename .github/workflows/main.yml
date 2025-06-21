@@ -1,6 +1,7 @@
 name: Run final.py every 3 hours
 
 on:
+  push:
   schedule:
     - cron: '0 */3 * * *'  # every 3 hours
   workflow_dispatch:       # allows manual trigger
