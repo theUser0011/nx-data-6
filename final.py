@@ -101,22 +101,22 @@ def fetch_all_episode_urls(anime_id, index):
         os.makedirs(json_folder, exist_ok=True)
         json_path = os.path.join(json_folder, f"{anime_id}_data.json")
 
-        try:
-            with open(json_path, "w", encoding="utf-8") as file:
-                json.dump(video_urls, file, indent=4)
-            print(f"✅ Saved: {json_path}")
-        except Exception as write_err:
-            print(f"❌ Error writing JSON: {write_err}")
-            return
+        # try:
+        #     with open(json_path, "w", encoding="utf-8") as file:
+        #         json.dump(video_urls, file, indent=4)
+        #     print(f"✅ Saved: {json_path}")
+        # except Exception as write_err:
+        #     print(f"❌ Error writing JSON: {write_err}")
+        #     return
 
         # Upload to Mega and save public link to DB
         try:
-            keys = os.getenv("M_TOKEN").split("_")
-            mega = Mega()
-            m = mega.login(keys[0], keys[1])
-            file = m.upload(json_path)
-            public_link = m.get_upload_link(file)
-            print(f"✅ Uploaded to Mega: {public_link}")
+            # keys = os.getenv("M_TOKEN").split("_")
+            # mega = Mega()
+            # m = mega.login(keys[0], keys[1])
+            # file = m.upload(json_path)
+            # public_link = m.get_upload_link(file)
+            # print(f"✅ Uploaded to Mega: {public_link}")
 
             mongo_url = os.getenv("MONGO_URL")
             client = MongoClient(mongo_url)
@@ -126,8 +126,8 @@ def fetch_all_episode_urls(anime_id, index):
             cloud_coll.insert_one({
                 "filename": f"{anime_id}_data.json",
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "public_link": public_link,
-                "message": "File successfully uploaded"
+                "file_data": video_urls,
+                "message": "Data successfully uploaded"
             })
 
         except Exception as e:
@@ -141,12 +141,12 @@ def fetch_all_episode_urls(anime_id, index):
             except:
                 pass
 
-        # Delete local file
-        try:
-            os.remove(json_path)
-            print(f"🧹 Removed local file: {json_path}")
-        except:
-            print(f"⚠️ Could not delete local file: {json_path}")
+        # # Delete local file
+        # try:
+        #     os.remove(json_path)
+        #     print(f"🧹 Removed local file: {json_path}")
+        # except:
+        #     print(f"⚠️ Could not delete local file: {json_path}")
 
     except Exception as e:
         print(f"❌ Unexpected error for anime_id {anime_id}: {e}")
